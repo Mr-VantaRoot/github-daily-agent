@@ -2,7 +2,7 @@ name: Daily Repository Scan
 
 on:
   schedule:
-    # 22:00 Ethiopia time (UTC+3), leaving time for a same-day contribution check.
+    # 22:19 Ethiopia time (UTC+3)
     - cron: "19 19 * * *"
   workflow_dispatch:
 
@@ -41,72 +41,27 @@ jobs:
         run: |
           PYTHONPATH=src python -m github_daily_agent --config config.yaml
 
-      - name: Check today's GitHub contributions
+      - name: Record daily run
         if: always() && steps.checkout.outcome == 'success'
-        id: contribution_check
         env:
-          GH_TOKEN: ${{ secrets.GH_AGENT_TOKEN }}
-        run: |
-          set -euo pipefail
-
-          today="$(TZ=Africa/Addis_Ababa date +'%Y-%m-%d')"
-          from="$(TZ=Africa/Addis_Ababa date -d "$today 00:00:00" --iso-8601=seconds)"
-          to="$(TZ=Africa/Addis_Ababa date --iso-8601=seconds)"
-
-          query='query($from: DateTime!, $to: DateTime!) {
-            viewer {
-              contributionsCollection(from: $from, to: $to) {
-                contributionCalendar {
-                  weeks {
-                    contributionDays {
-                      date
-                      contributionCount
-                    }
-                  }
-                }
-              }
-            }
-          }'
-
-          response="$(gh api graphql -f query="$query" -F from="$from" -F to="$to")"
-          count="$(jq -r --arg today "$today" '
-            [.data.viewer.contributionsCollection.contributionCalendar.weeks[].contributionDays[]
-             | select(.date == $today)
-             | .contributionCount] | first // 0
-          ' <<< "$response")"
-
-          echo "today=$today" >> "$GITHUB_OUTPUT"
-          echo "count=$count" >> "$GITHUB_OUTPUT"
-
-          if [ "$count" -gt 0 ]; then
-            echo "GitHub already reports $count contribution(s) for $today. No streak commit needed."
-            echo "needed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "No contribution is currently recorded for $today."
-            echo "needed=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Record contribution if today's graph is empty
-        if: steps.contribution_check.outputs.needed == 'true'
-        env:
-          TODAY: ${{ steps.contribution_check.outputs.today }}
           TEST_RESULT: ${{ steps.tests.outcome || 'not-run' }}
           SCAN_RESULT: ${{ steps.scan.outcome || 'not-run' }}
           CONTRIBUTION_EMAIL: "268955758+Mr-VantaRoot@users.noreply.github.com"
         run: |
           set -euo pipefail
+          today="$(TZ=Africa/Addis_Ababa date +'%Y-%m-%d')"
           mkdir -p activity
-          file="activity/${TODAY}.md"
+          file="activity/${today}.md"
 
           if [ -e "$file" ]; then
-            echo "A contribution record already exists for ${TODAY}; skipping a duplicate commit."
+            echo "Daily record already exists for ${today}; no duplicate commit."
             exit 0
           fi
 
           cat > "$file" <<EOF
           # Daily GitHub Agent Run
 
-          - Date: ${TODAY} (Africa/Addis_Ababa)
+          - Date: ${today} (Africa/Addis_Ababa)
           - Automated tests: ${TEST_RESULT}
           - Repository scan: ${SCAN_RESULT}
           - Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
@@ -115,7 +70,7 @@ jobs:
           git config user.name "Mr-VantaRoot"
           git config user.email "$CONTRIBUTION_EMAIL"
           git add "$file"
-          git commit -m "chore: record daily activity (${TODAY})"
+          git commit -m "chore: record daily agent run (${today})"
           git push origin HEAD:main
 
       - name: Upload scan report
