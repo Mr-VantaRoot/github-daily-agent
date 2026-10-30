@@ -1,0 +1,41 @@
+name: Daily Repository Scan
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 06:00 Ethiopia time (UTC+3)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-daily-agent-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out agent
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run daily scan
+        env:
+          GH_AGENT_TOKEN: ${{ secrets.GH_AGENT_TOKEN }}
+        run: |
+          PYTHONPATH=src python -m github_daily_agent --config config.yaml
+
+      - name: Upload scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-daily-agent-report
+          path: reports/latest.md
+          if-no-files-found: warn
+          retention-days: 30
