@@ -86,4 +86,4 @@ def _scalar(value):
     try:
         return int(value)
     except ValueError:
-        return value.strip("\\"'")
+        return value.strip(chr(34) + "'")
