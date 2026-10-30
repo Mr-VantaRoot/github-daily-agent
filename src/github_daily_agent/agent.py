@@ -21,6 +21,8 @@ def run(config, token, client=None):
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = ["# GitHub Daily Agent report", "", f"Scanned: {now}", ""]
     created = 0
+    max_issues = int(config.get("max_issues_per_run", 5))
+
     for full_name in config["repositories"]:
         lines += [f"## {full_name}", ""]
         try:
@@ -36,28 +38,50 @@ def run(config, token, client=None):
             if not findings:
                 lines += ["No configured repository-health findings detected.", ""]
                 continue
+
             lines += [f"Detected {len(findings)} finding(s):", ""]
-            issues = gh.list_open_issues(full_name) if config.get("create_issues") else []
+            if not config.get("create_issues"):
+                for finding in findings:
+                    lines += [f"- **{finding.title}** ({finding.key})", "  - Issue creation disabled."]
+                lines.append("")
+                continue
+
+            # Do not create issues unless existing issues can be read. Without this
+            # check, a permission failure could cause duplicate issues on every run.
+            try:
+                issues = gh.list_open_issues(full_name)
+            except GitHubError as exc:
+                lines += [
+                    f"  - Issue processing skipped: unable to list existing issues ({exc}).",
+                    "  - Check that this repository is included in the token and that Issues permission is Read and write.",
+                    "",
+                ]
+                continue
+
             for finding in findings:
                 lines += [f"- **{finding.title}** ({finding.key})"]
-                if not config.get("create_issues"):
-                    lines += ["  - Issue creation disabled."]
-                    continue
                 if _issue_exists(issues, finding.key):
                     lines += ["  - Existing open agent issue found; skipped duplicate."]
                     continue
-                if created >= int(config.get("max_issues_per_run", 5)):
+                if created >= max_issues:
                     lines += ["  - Per-run issue creation limit reached."]
                     continue
+
                 marker = f"\n\n<!-- github-daily-agent:{finding.key} -->"
                 body = finding.body + marker
-                result = gh.create_issue(full_name, finding.title, body)
+                try:
+                    result = gh.create_issue(full_name, finding.title, body)
+                except GitHubError as exc:
+                    lines += [f"  - Issue creation failed: {exc}"]
+                    continue
+
                 created += 1
                 issues.append(result)
                 lines += [f"  - Created issue: {result.get('html_url', '(URL unavailable)')}"]
             lines.append("")
         except GitHubError as exc:
             lines += [f"Scan error: {exc}", ""]
+
     report = "\n".join(lines)
     report_dir = Path(config.get("report_dir", "reports"))
     report_dir.mkdir(parents=True, exist_ok=True)
