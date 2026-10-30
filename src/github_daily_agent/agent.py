@@ -16,6 +16,20 @@ def _issue_exists(issues, key):
     return False
 
 
+def _permission_hint(exc):
+    if exc.status_code == 403:
+        return (
+            "Check that the fine-grained token includes this repository and has "
+            "Issues permission set to Read and write."
+        )
+    if exc.status_code == 404:
+        return (
+            "Check that the repository exists and is selected in the fine-grained "
+            "token; GitHub can return 404 when the token cannot access a repository."
+        )
+    return "Check the token permissions and GitHub API response."
+
+
 def run(config, token, client=None):
     gh = client or GitHub(token)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -30,58 +44,77 @@ def run(config, token, client=None):
             if repo.get("archived"):
                 lines += ["Skipped: repository is archived.", ""]
                 continue
+
             branch = repo.get("default_branch") or "main"
             tree = gh.get_tree(full_name, branch)
             if tree.get("truncated"):
-                lines += ["Warning: Git tree response was truncated; findings may be incomplete.", ""]
+                lines += [
+                    "Warning: Git tree response was truncated; findings may be incomplete.",
+                    "",
+                ]
+
             findings = analyze(repo, tree, config.get("checks", {}))
-            if not findings:
-                lines += ["No configured repository-health findings detected.", ""]
+        except GitHubError as exc:
+            lines += [
+                f"Scan warning: unable to inspect this repository ({exc}).",
+                f"  - {_permission_hint(exc)}",
+                "",
+            ]
+            continue
+
+        if not findings:
+            lines += ["No configured repository-health findings detected.", ""]
+            continue
+
+        lines += [f"Detected {len(findings)} finding(s):", ""]
+        if not config.get("create_issues"):
+            for finding in findings:
+                lines += [
+                    f"- **{finding.title}** ({finding.key})",
+                    "  - Issue creation is disabled.",
+                ]
+            lines.append("")
+            continue
+
+        # Read existing issues before creating anything. If this read fails,
+        # skip issue creation for this repository to avoid duplicate issues.
+        try:
+            issues = gh.list_open_issues(full_name)
+        except GitHubError as exc:
+            lines += [
+                f"- Issue processing warning: could not list open issues ({exc}).",
+                f"  - {_permission_hint(exc)}",
+                "  - Findings were detected, but no issues were created for this repository.",
+                "",
+            ]
+            continue
+
+        for finding in findings:
+            lines += [f"- **{finding.title}** ({finding.key})"]
+            if _issue_exists(issues, finding.key):
+                lines += ["  - Existing open agent issue found; skipped duplicate."]
+                continue
+            if created >= max_issues:
+                lines += ["  - Per-run issue creation limit reached; will retry on a later run."]
                 continue
 
-            lines += [f"Detected {len(findings)} finding(s):", ""]
-            if not config.get("create_issues"):
-                for finding in findings:
-                    lines += [f"- **{finding.title}** ({finding.key})", "  - Issue creation disabled."]
-                lines.append("")
-                continue
-
-            # Do not create issues unless existing issues can be read. Without this
-            # check, a permission failure could cause duplicate issues on every run.
+            marker = f"\n\n<!-- github-daily-agent:{finding.key} -->"
+            body = finding.body + marker
             try:
-                issues = gh.list_open_issues(full_name)
+                result = gh.create_issue(full_name, finding.title, body)
             except GitHubError as exc:
                 lines += [
-                    f"  - Issue processing skipped: unable to list existing issues ({exc}).",
-                    "  - Check that this repository is included in the token and that Issues permission is Read and write.",
-                    "",
+                    f"  - Issue creation warning: {exc}",
+                    f"  - {_permission_hint(exc)}",
                 ]
                 continue
 
-            for finding in findings:
-                lines += [f"- **{finding.title}** ({finding.key})"]
-                if _issue_exists(issues, finding.key):
-                    lines += ["  - Existing open agent issue found; skipped duplicate."]
-                    continue
-                if created >= max_issues:
-                    lines += ["  - Per-run issue creation limit reached."]
-                    continue
+            created += 1
+            issues.append(result)
+            lines += [f"  - Created issue: {result.get('html_url', '(URL unavailable)')}"]
+        lines.append("")
 
-                marker = f"\n\n<!-- github-daily-agent:{finding.key} -->"
-                body = finding.body + marker
-                try:
-                    result = gh.create_issue(full_name, finding.title, body)
-                except GitHubError as exc:
-                    lines += [f"  - Issue creation failed: {exc}"]
-                    continue
-
-                created += 1
-                issues.append(result)
-                lines += [f"  - Created issue: {result.get('html_url', '(URL unavailable)')}"]
-            lines.append("")
-        except GitHubError as exc:
-            lines += [f"Scan error: {exc}", ""]
-
+    lines += [f"## Run summary", "", f"- Issues created: {created}", ""]
     report = "\n".join(lines)
     report_dir = Path(config.get("report_dir", "reports"))
     report_dir.mkdir(parents=True, exist_ok=True)
