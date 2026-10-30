@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from github_daily_agent.agent import run
+from github_daily_agent.github import GitHubError
 
 
 class FakeGitHub:
@@ -55,19 +56,56 @@ class MultiRepoFakeGitHub:
         ]
 
 
+class PermissionFailureFake(MultiRepoFakeGitHub):
+    def list_open_issues(self, name):
+        if name == "octo/blocked":
+            raise GitHubError(
+                "GitHub API 403 for /issues: Resource not accessible by personal access token",
+                status_code=403,
+                path="/repos/octo/blocked/issues",
+            )
+        return super().list_open_issues(name)
+
+
+class CreationFailureFake(MultiRepoFakeGitHub):
+    def create_issue(self, name, title, body):
+        if name == "octo/blocked":
+            raise GitHubError(
+                "GitHub API 403 for /issues: Resource not accessible by personal access token",
+                status_code=403,
+                path="/repos/octo/blocked/issues",
+            )
+        return super().create_issue(name, title, body)
+
+
 class AgentTests(unittest.TestCase):
+    def _config(self, report_dir, repositories=None):
+        return {
+            "repositories": repositories or ["octo/repo"],
+            "create_issues": True,
+            "max_issues_per_run": 5,
+            "report_dir": report_dir,
+            "checks": {
+                "missing_readme": False,
+                "missing_tests": True,
+                "missing_ci": True,
+            },
+        }
+
     def test_creates_findings_and_report(self):
         with tempfile.TemporaryDirectory() as d:
             fake = FakeGitHub()
-            cfg = {
-                "repositories": ["octo/repo"], "create_issues": True,
-                "max_issues_per_run": 5, "report_dir": d,
-                "checks": {"missing_readme": True, "missing_tests": False, "missing_ci": False}
+            cfg = self._config(d)
+            cfg["checks"] = {
+                "missing_readme": True,
+                "missing_tests": False,
+                "missing_ci": False,
             }
             report = run(cfg, "unused", client=fake)
             self.assertEqual(len(fake.created), 1)
             self.assertIn("Created issue", report)
             self.assertIn("\n\n<!-- github-daily-agent:missing-readme -->", fake.created[0]["body"])
+            self.assertIn("Issues created: 1", report)
             self.assertTrue((Path(d) / "latest.md").exists())
 
     def test_deduplicates_open_agent_issue(self):
@@ -75,10 +113,11 @@ class AgentTests(unittest.TestCase):
             marker = "<!-- github-daily-agent:missing-readme -->"
             fake = FakeGitHub()
             fake.created = [{"body": marker}]
-            cfg = {
-                "repositories": ["octo/repo"], "create_issues": True,
-                "max_issues_per_run": 5, "report_dir": d,
-                "checks": {"missing_readme": True, "missing_tests": False, "missing_ci": False}
+            cfg = self._config(d)
+            cfg["checks"] = {
+                "missing_readme": True,
+                "missing_tests": False,
+                "missing_ci": False,
             }
             run(cfg, "unused", client=fake)
             self.assertEqual(len(fake.created), 1)
@@ -87,17 +126,7 @@ class AgentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             fake = MultiRepoFakeGitHub()
             repositories = [f"octo/repo-{i}" for i in range(7)]
-            cfg = {
-                "repositories": repositories,
-                "create_issues": True,
-                "max_issues_per_run": 5,
-                "report_dir": d,
-                "checks": {
-                    "missing_readme": False,
-                    "missing_tests": True,
-                    "missing_ci": True,
-                },
-            }
+            cfg = self._config(d, repositories)
 
             first_report = run(cfg, "unused", client=fake)
             self.assertEqual(len(fake.all_created()), 5)
@@ -124,6 +153,31 @@ class AgentTests(unittest.TestCase):
             self.assertEqual(len(created_keys), 14)
             self.assertEqual(len(set(created_keys)), 14)
             self.assertIn("Existing open agent issue found; skipped duplicate.", fourth_report)
+
+    def test_issue_read_permission_failure_does_not_stop_other_repositories(self):
+        with tempfile.TemporaryDirectory() as d:
+            fake = PermissionFailureFake()
+            cfg = self._config(d, ["octo/blocked", "octo/allowed"])
+
+            report = run(cfg, "unused", client=fake)
+
+            self.assertIn("Issue processing warning", report)
+            self.assertIn("Issues permission set to Read and write", report)
+            self.assertEqual(len(fake.created_by_repo.get("octo/blocked", [])), 0)
+            self.assertEqual(len(fake.created_by_repo.get("octo/allowed", [])), 2)
+            self.assertIn("Issues created: 2", report)
+
+    def test_issue_creation_permission_failure_does_not_stop_other_findings_or_repositories(self):
+        with tempfile.TemporaryDirectory() as d:
+            fake = CreationFailureFake()
+            cfg = self._config(d, ["octo/blocked", "octo/allowed"])
+
+            report = run(cfg, "unused", client=fake)
+
+            self.assertIn("Issue creation warning", report)
+            self.assertEqual(len(fake.created_by_repo.get("octo/blocked", [])), 0)
+            self.assertEqual(len(fake.created_by_repo.get("octo/allowed", [])), 2)
+            self.assertIn("Issues created: 2", report)
 
 
 if __name__ == "__main__":
