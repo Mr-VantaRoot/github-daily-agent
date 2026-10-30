@@ -10,9 +10,14 @@ def load_config(path):
         cfg = json.loads(raw)
     except json.JSONDecodeError:
         cfg = _minimal_yaml(raw)
+
+    if not isinstance(cfg, dict):
+        raise ValueError("config must be a mapping")
+
     repos = cfg.get("repositories", [])
     if not isinstance(repos, list) or not repos:
         raise ValueError("config must contain a non-empty repositories list")
+
     clean = []
     for repo in repos:
         if not isinstance(repo, str) or repo.count("/") != 1:
@@ -22,11 +27,26 @@ def load_config(path):
             raise ValueError(f"Invalid repository name: {repo!r}")
         if repo not in clean:
             clean.append(repo)
+
     cfg["repositories"] = clean
     cfg.setdefault("create_issues", False)
     cfg.setdefault("max_issues_per_run", 5)
     cfg.setdefault("report_dir", "reports")
     cfg.setdefault("checks", {})
+
+    if not isinstance(cfg["create_issues"], bool):
+        raise ValueError("create_issues must be true or false")
+    limit = cfg["max_issues_per_run"]
+    if type(limit) is not int or limit < 1:
+        raise ValueError("max_issues_per_run must be a positive integer")
+    if not isinstance(cfg["report_dir"], str) or not cfg["report_dir"].strip():
+        raise ValueError("report_dir must be a non-empty path string")
+    if not isinstance(cfg["checks"], dict):
+        raise ValueError("checks must be a mapping")
+    for name, enabled in cfg["checks"].items():
+        if not isinstance(enabled, bool):
+            raise ValueError(f"check {name!r} must be true or false")
+
     return cfg
 
 
@@ -66,4 +86,4 @@ def _scalar(value):
     try:
         return int(value)
     except ValueError:
-        return value.strip("\"'")
+        return value.strip("\\"'")
