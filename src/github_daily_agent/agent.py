@@ -49,9 +49,11 @@ def run(config, token, client=None):
             tree = gh.get_tree(full_name, branch)
             if tree.get("truncated"):
                 lines += [
-                    "Warning: Git tree response was truncated; findings may be incomplete.",
+                    "Scan incomplete: GitHub returned a truncated file tree.",
+                    "  - No findings or issues were generated for this repository because absence checks would be unreliable.",
                     "",
                 ]
+                continue
 
             findings = analyze(repo, tree, config.get("checks", {}))
         except GitHubError as exc:
