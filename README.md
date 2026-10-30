@@ -30,6 +30,12 @@ GitHub Actions runs daily at **03:00 UTC (06:00 Ethiopia time)**. You can also s
 
 GitHub may delay scheduled runs during high load. Check the Actions tab to confirm each run.
 
+## Permission warnings
+
+The scanner separates repository inspection from issue management. If it can inspect a repository but cannot read or create issues, the report records the warning and continues with the other repositories. For a fine-grained token, confirm that the affected repository is selected and **Issues** is set to **Read and write**. The agent will not create issues when it cannot first list open issues, because doing so could create duplicates.
+
+If GitHub returns a truncated repository tree, that repository is marked as incomplete and no absence-based findings are generated for it.
+
 ## Setup
 
 1. In your GitHub account, create a **fine-grained personal access token**.
