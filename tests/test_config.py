@@ -29,6 +29,10 @@ checks:
             with self.assertRaises(ValueError):
                 load_config(p)
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_rejects_invalid_repository_names(self):
+        for invalid in ("octo", "/repo", "octo/", "octo/repo name"):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as d:
+                p = Path(d) / "config.yaml"
+                p.write_text(f"repositories:\n  - {invalid}\n")
+                with self.assertRaises(ValueError):
+                    load_config(p)
