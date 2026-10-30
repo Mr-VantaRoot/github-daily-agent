@@ -42,13 +42,14 @@ jobs:
           PYTHONPATH=src python -m github_daily_agent --config config.yaml
 
       - name: Check today's GitHub contributions
+        if: always() && steps.checkout.outcome == 'success'
         id: contribution_check
         env:
           GH_TOKEN: ${{ secrets.GH_AGENT_TOKEN }}
         run: |
           set -euo pipefail
 
-          today="$(TZ= Africa/Addis_Ababa date +'%Y-%m-%d')"
+          today="$(TZ=Africa/Addis_Ababa date +'%Y-%m-%d')"
           from="$(TZ=Africa/Addis_Ababa date -d "$today 00:00:00" --iso-8601=seconds)"
           to="$(TZ=Africa/Addis_Ababa date --iso-8601=seconds)"
 
