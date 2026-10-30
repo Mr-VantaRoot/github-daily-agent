@@ -67,6 +67,11 @@ class PermissionFailureFake(MultiRepoFakeGitHub):
         return super().list_open_issues(name)
 
 
+class TruncatedTreeFake(MultiRepoFakeGitHub):
+    def get_tree(self, name, branch):
+        return {"tree": [], "truncated": True}
+
+
 class CreationFailureFake(MultiRepoFakeGitHub):
     def create_issue(self, name, title, body):
         if name == "octo/blocked":
@@ -153,6 +158,16 @@ class AgentTests(unittest.TestCase):
             self.assertEqual(len(created_keys), 14)
             self.assertEqual(len(set(created_keys)), 14)
             self.assertIn("Existing open agent issue found; skipped duplicate.", fourth_report)
+
+    def test_truncated_tree_does_not_create_false_positive_issues(self):
+        with tempfile.TemporaryDirectory() as d:
+            fake = TruncatedTreeFake()
+            cfg = self._config(d, ["octo/large"])
+
+            report = run(cfg, "unused", client=fake)
+
+            self.assertIn("Scan incomplete", report)
+            self.assertEqual(fake.all_created(), [])
 
     def test_issue_read_permission_failure_does_not_stop_other_repositories(self):
         with tempfile.TemporaryDirectory() as d:
