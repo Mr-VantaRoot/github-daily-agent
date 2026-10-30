@@ -2,11 +2,11 @@ name: Daily Repository Scan
 
 on:
   schedule:
-    - cron: "0 3 * * *" # 06:00 Ethiopia time (UTC+3)
+    - cron: "17 3 * * *" # 06:17 Ethiopia time (UTC+3)
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: github-daily-agent-scan
@@ -18,9 +18,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Check out agent
+        id: checkout
         uses: actions/checkout@v5
         with:
-          persist-credentials: false
+          ref: main
+          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -28,13 +30,47 @@ jobs:
           python-version: "3.12"
 
       - name: Run automated tests
+        id: tests
         run: PYTHONPATH=src python -m unittest discover -s tests -v
 
       - name: Run daily scan
+        id: scan
         env:
           GH_AGENT_TOKEN: ${{ secrets.GH_AGENT_TOKEN }}
         run: |
           PYTHONPATH=src python -m github_daily_agent --config config.yaml
+
+      - name: Record daily contribution
+        if: always() && steps.checkout.outcome == 'success'
+        env:
+          TEST_RESULT: ${{ steps.tests.outcome || 'not-run' }}
+          SCAN_RESULT: ${{ steps.scan.outcome || 'not-run' }}
+          CONTRIBUTION_EMAIL: "268955758+Mr-VantaRoot@users.noreply.github.com"
+        run: |
+          set -euo pipefail
+          day="$(date -u +'%Y-%m-%d')"
+          mkdir -p activity
+          file="activity/${day}.md"
+
+          if [ -e "$file" ]; then
+            echo "Daily activity already recorded for ${day}; skipping duplicate commit."
+            exit 0
+          fi
+
+          cat > "$file" <<EOF
+          # Daily GitHub Agent Activity
+
+          - Date: ${day} (UTC)
+          - Automated tests: ${TEST_RESULT}
+          - Repository scan: ${SCAN_RESULT}
+          - Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "$CONTRIBUTION_EMAIL"
+          git add "$file"
+          git commit -m "chore: record daily agent activity (${day})"
+          git push origin HEAD:main
 
       - name: Upload scan report
         if: always()
