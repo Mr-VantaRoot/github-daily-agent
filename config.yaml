@@ -1,0 +1,18 @@
+# Explicit allowlist. Only these repositories are scanned.
+repositories:
+  - Mr-VantaRoot/port_scanner
+  - Mr-VantaRoot/Network-Monitor
+  - Mr-VantaRoot/file_encryptor
+  - Mr-VantaRoot/password_checker.py
+  - Mr-VantaRoot/check_ip.py
+  - Mr-VantaRoot/Birhanguard
+  - Mr-VantaRoot/milky-smiles-connect
+
+create_issues: true
+max_issues_per_run: 5
+report_dir: reports
+
+checks:
+  missing_readme: true
+  missing_tests: true
+  missing_ci: true
