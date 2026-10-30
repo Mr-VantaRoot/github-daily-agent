@@ -25,7 +25,7 @@ checks:
     def test_rejects_empty_allowlist(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "config.yaml"
-            p.write_text("repositories: []\n")
+            p.write_text("repositories: []\\n")
             with self.assertRaises(ValueError):
                 load_config(p)
 
@@ -33,6 +33,29 @@ checks:
         for invalid in ("octo", "/repo", "octo/", "octo/repo name"):
             with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as d:
                 p = Path(d) / "config.yaml"
-                p.write_text(f"repositories:\n  - {invalid}\n")
+                p.write_text(f"repositories:\\n  - {invalid}\\n")
                 with self.assertRaises(ValueError):
                     load_config(p)
+
+    def test_rejects_nonpositive_issue_limit(self):
+        for limit in (0, -1):
+            with self.subTest(limit=limit), tempfile.TemporaryDirectory() as d:
+                p = Path(d) / "config.yaml"
+                p.write_text(
+                    f"repositories:\\n  - octo/repo\\nmax_issues_per_run: {limit}\\n"
+                )
+                with self.assertRaises(ValueError):
+                    load_config(p)
+
+    def test_rejects_invalid_check_values(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "config.yaml"
+            p.write_text(
+                "repositories:\\n  - octo/repo\\nchecks:\\n  missing_ci: yes\\n"
+            )
+            with self.assertRaises(ValueError):
+                load_config(p)
+
+
+if __name__ == "__main__":
+    unittest.main()
