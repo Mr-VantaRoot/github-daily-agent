@@ -89,6 +89,7 @@ tests/
   test_agent.py
   test_analyzer.py
   test_config.py
+  test_github.py
 ```
 
 ## Tests
