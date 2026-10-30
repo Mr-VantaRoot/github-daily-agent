@@ -7,7 +7,10 @@ API = "https://api.github.com"
 
 
 class GitHubError(RuntimeError):
-    pass
+    def __init__(self, message, status_code=None, path=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.path = path
 
 
 class GitHub:
@@ -30,9 +33,19 @@ class GitHub:
                 return json.loads(payload) if payload else {}
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:500]
-            raise GitHubError(f"GitHub API {exc.code} for {path}: {detail}") from exc
+            try:
+                message = json.loads(detail).get("message", detail)
+            except (json.JSONDecodeError, AttributeError):
+                message = detail
+            raise GitHubError(
+                f"GitHub API {exc.code} for {path}: {message}",
+                status_code=exc.code,
+                path=path,
+            ) from exc
         except urllib.error.URLError as exc:
-            raise GitHubError(f"GitHub API connection error: {exc}") from exc
+            raise GitHubError(f"GitHub API connection error: {exc}", path=path) from exc
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise GitHubError(f"GitHub API returned an invalid response for {path}: {exc}", path=path) from exc
 
     def get_repo(self, full_name):
         owner, repo = full_name.split("/", 1)
@@ -45,7 +58,22 @@ class GitHub:
 
     def list_open_issues(self, full_name):
         owner, repo = full_name.split("/", 1)
-        return self.request("GET", f"/repos/{owner}/{repo}/issues?state=open&per_page=100")
+        issues = []
+        page = 1
+        while True:
+            batch = self.request(
+                "GET",
+                f"/repos/{owner}/{repo}/issues?state=open&per_page=100&page={page}",
+            )
+            if not isinstance(batch, list):
+                raise GitHubError(
+                    f"GitHub returned an unexpected issue-list response for {full_name}",
+                    path=f"/repos/{owner}/{repo}/issues",
+                )
+            issues.extend(batch)
+            if len(batch) < 100:
+                return issues
+            page += 1
 
     def create_issue(self, full_name, title, body, labels=None):
         owner, repo = full_name.split("/", 1)
