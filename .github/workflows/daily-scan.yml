@@ -58,12 +58,10 @@ jobs:
           mkdir -p activity
           file="activity/${today}.md"
 
-          if [ -e "$file" ]; then
-            echo "Daily record already exists for ${today}; no duplicate commit."
-            exit 0
-          fi
+          temp_file="$(mktemp)"
+          trap 'rm -f "$temp_file"' EXIT
 
-          cat > "$file" <<EOF
+          cat > "$temp_file" <<EOF
           # Daily GitHub Agent Run
 
           - Date: ${today} (Africa/Addis_Ababa)
@@ -71,6 +69,13 @@ jobs:
           - Repository scan: ${SCAN_RESULT}
           - Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
           EOF
+
+          if [ -e "$file" ] && cmp -s "$temp_file" "$file"; then
+            echo "Daily record is already up to date; no commit needed."
+            exit 0
+          fi
+
+          mv "$temp_file" "$file"
 
           git config user.name "Mr-VantaRoot"
           git config user.email "$CONTRIBUTION_EMAIL"
