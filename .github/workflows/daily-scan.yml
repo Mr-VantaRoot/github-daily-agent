@@ -1,6 +1,11 @@
 name: Daily Repository Scan
 
 on:
+  push:
+    paths:
+      - ".github/workflows/daily-scan.yml"
+      - "src/**"
+      - "tests/**"
   schedule:
     # 22:19 Ethiopia time (UTC+3)
     - cron: "19 19 * * *"
