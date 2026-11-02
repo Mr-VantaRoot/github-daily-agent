@@ -97,7 +97,7 @@ def run(config, token, client=None):
                 lines += ["  - Existing open agent issue found; skipped duplicate."]
                 continue
             if created >= max_issues:
-                lines += ["  - Per-run issue creation limit reached; will retry on a later run."]
+                lines += ["  - Per-run issue creation limit reached. Will retry on a later run."]
                 continue
 
             marker = f"\n\n<!-- github-daily-agent:{finding.key} -->"
